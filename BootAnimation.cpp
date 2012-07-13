@@ -284,21 +284,32 @@ status_t BootAnimation::readyToRun() {
 
     bool encryptedAnimation = atoi(decrypt) != 0 || !strcmp("trigger_restart_min_framework", decrypt);
 
-    if ((encryptedAnimation &&
-            ((access(mAnimationFile, R_OK) == 0) &&
-            (mZip.open(mAnimationFile) == NO_ERROR)) ||
-
-            (access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE) == NO_ERROR)) ||
-
-            ((access(USER_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(USER_BOOTANIMATION_FILE) == NO_ERROR)) ||
-
-            ((access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(SYSTEM_BOOTANIMATION_FILE) == NO_ERROR))) {
-        mAndroidAnimation = false;
-    }
-
+	mAndroidAnimation = false;
+	if((access(mAnimationFile, R_OK) == 0) &&
+   	 (mZip.open(mAnimationFile) == NO_ERROR))
+	{
+		//mAndroidAnimation = false;
+	}
+	else if(encryptedAnimation &&
+			(access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0) &&
+            (mZip.open(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE) == NO_ERROR)) 
+	{
+		//mAndroidAnimation = false;
+	}
+	else if((access(USER_BOOTANIMATION_FILE, R_OK) == 0) &&
+    (mZip.open(USER_BOOTANIMATION_FILE) == NO_ERROR))
+	{
+		//mAndroidAnimation = false;
+	}
+	else if((access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0) &&
+    (mZip.open(SYSTEM_BOOTANIMATION_FILE) == NO_ERROR))
+	{
+		//mAndroidAnimation = false;
+	}
+	else
+	{
+		mAndroidAnimation = true;
+	}
     return NO_ERROR;
 }
 

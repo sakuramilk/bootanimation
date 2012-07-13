@@ -74,6 +74,15 @@ int main(int argc, char** argv)
         sp<ProcessState> proc(ProcessState::self());
         ProcessState::self()->startThreadPool();
 
+		if(argc > 1)
+		{
+			LOGI("bootanim_file_args=%s", argv[1]);
+		}
+		if(argc > 2)
+		{
+			LOGI("bootsound_file_args=%s", argv[2]);
+		}
+
         // create the boot animation object
         sp<BootAnimation> boot = new BootAnimation(
                                          noBootAnimationWait ? true : false,
