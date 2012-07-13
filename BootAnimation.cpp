@@ -579,13 +579,29 @@ bool BootAnimation::movie()
                 }
                 glDrawTexiOES(xc, yc, 0, animation.width, animation.height);
                 eglSwapBuffers(mDisplay, mSurface);
-
+#if 0
                 nsecs_t now = systemTime();
                 nsecs_t delay = frameDuration - (now - lastFrame);
                 lastFrame = now;
                 long wait = ns2us(frameDuration);
                 if (wait > 0)
                     usleep(wait);
+#else
+//-- framerate priority by ma34
+				nsecs_t now;
+				while(1)
+				{
+					now = systemTime();
+					nsecs_t elapsed = (now - lastFrame);
+					if(frameDuration <= elapsed )
+					{
+						break;
+					}
+					usleep(250);	
+				}
+				lastFrame = now;
+#endif
+
                 if (noTextureCache)
                     glDeleteTextures(1, &frame.tid);
             }
