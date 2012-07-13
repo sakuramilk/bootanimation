@@ -49,6 +49,9 @@
 #include <GLES/glext.h>
 #include <EGL/eglext.h>
 
+#include <media/AudioSystem.h>
+#include <media/mediaplayer.h>
+
 #include "BootAnimation.h"
 
 #define USER_BOOTANIMATION_FILE "/data/local/bootanimation.zip"
@@ -59,8 +62,20 @@ namespace android {
 
 // ---------------------------------------------------------------------------
 
-BootAnimation::BootAnimation() : Thread(false)
+BootAnimation::BootAnimation(bool noBootAnimationWait, const char* animationFile,
+    const char* audioFile, float audioVolume) :
+    Thread(false), mNoBootAnimationWait(noBootAnimationWait), mAudioVolume(audioVolume)
 {
+    if (animationFile) {
+        strcpy(mAnimationFile, animationFile);
+    } else {
+        mAnimationFile[0] = '\0';
+    }
+    if (audioFile) {
+        strcpy(mAudioFile, audioFile);
+    } else {
+        mAudioFile[0] = '\0';
+    }
     mSession = new SurfaceComposerClient();
 }
 
@@ -270,6 +285,9 @@ status_t BootAnimation::readyToRun() {
     bool encryptedAnimation = atoi(decrypt) != 0 || !strcmp("trigger_restart_min_framework", decrypt);
 
     if ((encryptedAnimation &&
+            ((access(mAnimationFile, R_OK) == 0) &&
+            (mZip.open(mAnimationFile) == NO_ERROR)) ||
+
             (access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0) &&
             (mZip.open(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE) == NO_ERROR)) ||
 
@@ -468,16 +486,61 @@ bool BootAnimation::movie()
     Region clearReg(Rect(mWidth, mHeight));
     clearReg.subtractSelf(Rect(xc, yc, xc+animation.width, yc+animation.height));
 
+    char propValue[PROPERTY_VALUE_MAX];
+    bool isBootCompleted = false;
+
+    if (mNoBootAnimationWait) {
+        property_set("sys.bootanim_completed", "1");
+    }
+
+    MediaPlayer* mp = NULL;
+    if (mAudioFile[0] != '\0') {
+        mp = new MediaPlayer();
+        if (mp->setDataSource(mAudioFile, NULL) == NO_ERROR) {
+            //mp->setAudioStreamType(AUDIO_STREAM_SYSTEM);
+            mp->setVolume(mAudioVolume, mAudioVolume);
+            mp->prepare();
+            mp->seekTo(0);
+            mp->start();
+        } else {
+            LOGE("Failed to load audio file: %s", mAudioFile);
+            mp->disconnect();
+            delete mp;
+            mp = NULL;
+        }
+    }
+
     for (int i=0 ; i<pcount && !exitPending() ; i++) {
         const Animation::Part& part(animation.parts[i]);
         const size_t fcount = part.frames.size();
+        const int noTextureCache = ((animation.width * animation.height * fcount) >
+                                 48 * 1024 * 1024) ? 1 : 0;
+
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        for (int r=0 ; !part.count || r<part.count ; r++) {
-            for (int j=0 ; j<fcount && !exitPending(); j++) {
+        for (int r=0 ; (!part.count || r<part.count) && !isBootCompleted; r++) {
+            if (r > part.count && !isBootCompleted) {
+                property_get("sys.boot_completed", propValue, "0");
+                if (propValue[0] == '1') {
+                    seteuid(0);
+                    property_set("sys.bootanim_completed", "1");
+                    //setenv("BOOTANIM_COMPLETED", "1", 1);
+                    seteuid(1003);
+                    isBootCompleted = true;
+                    break;
+                }
+            }
+            for (int j=0 ; j<fcount && !exitPending() && !isBootCompleted; j++) {
+                if (mNoBootAnimationWait && !isBootCompleted) {
+                    property_get("sys.boot_completed", propValue, "0");
+                    if (propValue[0] == '1') {
+                        isBootCompleted = true;
+                        break;
+                    }
+                }
                 const Animation::Frame& frame(part.frames[j]);
 
-                if (r > 0) {
+                if (r > 0 && !noTextureCache) {
                     glBindTexture(GL_TEXTURE_2D, frame.tid);
                 } else {
                     if (part.count != 1) {
@@ -512,17 +575,25 @@ bool BootAnimation::movie()
                 long wait = ns2us(frameDuration);
                 if (wait > 0)
                     usleep(wait);
+                if (noTextureCache)
+                    glDeleteTextures(1, &frame.tid);
             }
             usleep(part.pause * ns2us(frameDuration));
         }
 
         // free the textures for this part
-        if (part.count != 1) {
+        if (part.count != 1 && !noTextureCache) {
             for (int j=0 ; j<fcount ; j++) {
                 const Animation::Frame& frame(part.frames[j]);
                 glDeleteTextures(1, &frame.tid);
             }
         }
+    }
+
+    if (mp) {
+        mp->stop();
+        mp->disconnect();
+        delete mp;
     }
 
     return false;
