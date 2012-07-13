@@ -58,12 +58,17 @@
 #define SYSTEM_BOOTANIMATION_FILE "/system/media/bootanimation.zip"
 #define SYSTEM_ENCRYPTED_BOOTANIMATION_FILE "/system/media/bootanimation-encrypted.zip"
 
+//#define USER_BOOTMOVIE_FILE "/data/local/bootmovie.mp4"
+
 namespace android {
 
 // ---------------------------------------------------------------------------
-
-BootAnimation::BootAnimation(bool noBootAnimationWait, const char* animationFile,
-    const char* audioFile, float audioVolume) :
+BootAnimation::BootAnimation(
+				bool noBootAnimationWait	,
+				const char* animationFile	,
+    			const char* audioFile		,
+    			const char* movieFile		,
+    			float audioVolume			) :
     Thread(false), mNoBootAnimationWait(noBootAnimationWait), mAudioVolume(audioVolume)
 {
     if (animationFile) {
@@ -75,6 +80,11 @@ BootAnimation::BootAnimation(bool noBootAnimationWait, const char* animationFile
         strcpy(mAudioFile, audioFile);
     } else {
         mAudioFile[0] = '\0';
+    }
+    if (movieFile) {
+        strcpy(mMovieFile, movieFile);
+    } else {
+        mMovieFile[0] = '\0';
     }
     mSession = new SurfaceComposerClient();
 }
@@ -255,71 +265,90 @@ status_t BootAnimation::readyToRun() {
     EGLSurface surface;
     EGLContext context;
 
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+//-----------------------------------------------------------------
+// at first
+//	judge play contents.
 
-    eglInitialize(display, 0, 0);
-    eglChooseConfig(display, attribs, &config, 1, &numConfigs);
-    surface = eglCreateWindowSurface(display, config, s.get(), NULL);
-    context = eglCreateContext(display, config, NULL, NULL);
-    eglQuerySurface(display, surface, EGL_WIDTH, &w);
-    eglQuerySurface(display, surface, EGL_HEIGHT, &h);
+	mMoviePlay			= false;
+	if(access(mMovieFile, R_OK) == 0)
+	{
+		mMoviePlay			= true;
+	}
+	else
+	{
+		mAndroidAnimation = true;
+	    // If the device has encryption turned on or is in process 
+	    // of being encrypted we show the encrypted boot animation.
+	    char decrypt[PROPERTY_VALUE_MAX];
+	    property_get("vold.decrypt", decrypt, "");
 
-    if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE)
-        return NO_INIT;
+	    bool encryptedAnimation = atoi(decrypt) != 0 || !strcmp("trigger_restart_min_framework", decrypt);
 
-    mDisplay = display;
-    mContext = context;
-    mSurface = surface;
+		mAndroidAnimation = false;
+		if((access(mAnimationFile, R_OK) == 0) &&
+	   	 (mZip.open(mAnimationFile) == NO_ERROR))
+		{
+			//mAndroidAnimation = false;
+		}
+		else if(encryptedAnimation &&
+				(access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0) &&
+	            (mZip.open(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE) == NO_ERROR)) 
+		{
+			//mAndroidAnimation = false;
+		}
+		else if((access(USER_BOOTANIMATION_FILE, R_OK) == 0) &&
+	    (mZip.open(USER_BOOTANIMATION_FILE) == NO_ERROR))
+		{
+			//mAndroidAnimation = false;
+		}
+		else if((access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0) &&
+	    (mZip.open(SYSTEM_BOOTANIMATION_FILE) == NO_ERROR))
+		{
+			//mAndroidAnimation = false;
+		}
+		else
+		{
+			mAndroidAnimation = true;
+		}
+//-----------------------------------------------------------------
+		//if movie play not need ogl setting...
+	    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+
+	    eglInitialize(display, 0, 0);
+	    eglChooseConfig(display, attribs, &config, 1, &numConfigs);
+	    surface = eglCreateWindowSurface(display, config, s.get(), NULL);
+	    context = eglCreateContext(display, config, NULL, NULL);
+	    eglQuerySurface(display, surface, EGL_WIDTH, &w);
+	    eglQuerySurface(display, surface, EGL_HEIGHT, &h);
+
+	    if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE)
+	        return NO_INIT;
+
+	    mDisplay = display;
+	    mContext = context;
+	    mSurface = surface;
+	}
+
     mWidth = w;
     mHeight = h;
     mFlingerSurfaceControl = control;
     mFlingerSurface = s;
 
-    mAndroidAnimation = true;
-
-    // If the device has encryption turned on or is in process 
-    // of being encrypted we show the encrypted boot animation.
-    char decrypt[PROPERTY_VALUE_MAX];
-    property_get("vold.decrypt", decrypt, "");
-
-    bool encryptedAnimation = atoi(decrypt) != 0 || !strcmp("trigger_restart_min_framework", decrypt);
-
-	mAndroidAnimation = false;
-	if((access(mAnimationFile, R_OK) == 0) &&
-   	 (mZip.open(mAnimationFile) == NO_ERROR))
-	{
-		//mAndroidAnimation = false;
-	}
-	else if(encryptedAnimation &&
-			(access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE) == NO_ERROR)) 
-	{
-		//mAndroidAnimation = false;
-	}
-	else if((access(USER_BOOTANIMATION_FILE, R_OK) == 0) &&
-    (mZip.open(USER_BOOTANIMATION_FILE) == NO_ERROR))
-	{
-		//mAndroidAnimation = false;
-	}
-	else if((access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0) &&
-    (mZip.open(SYSTEM_BOOTANIMATION_FILE) == NO_ERROR))
-	{
-		//mAndroidAnimation = false;
-	}
-	else
-	{
-		mAndroidAnimation = true;
-	}
     return NO_ERROR;
 }
 
 bool BootAnimation::threadLoop()
 {
     bool r;
-    if (mAndroidAnimation) {
+	//prority is  movie > animation ( when no animation, android)
+	if(mMoviePlay)
+	{
+		r = movie();
+	}
+    else if (mAndroidAnimation) {
         r = android();
     } else {
-        r = movie();
+        r = animation();
     }
 
     eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -394,9 +423,7 @@ bool BootAnimation::android()
     glDeleteTextures(1, &mAndroid[1].name);
     return false;
 }
-
-
-bool BootAnimation::movie()
+bool BootAnimation::animation()
 {
     ZipFileRO& zip(mZip);
 
@@ -541,6 +568,7 @@ bool BootAnimation::movie()
                     break;
                 }
             }
+
             for (int j=0 ; j<fcount && !exitPending() && !isBootCompleted; j++) {
                 if (mNoBootAnimationWait && !isBootCompleted) {
                     property_get("sys.boot_completed", propValue, "0");
@@ -579,14 +607,7 @@ bool BootAnimation::movie()
                 }
                 glDrawTexiOES(xc, yc, 0, animation.width, animation.height);
                 eglSwapBuffers(mDisplay, mSurface);
-#if 0
-                nsecs_t now = systemTime();
-                nsecs_t delay = frameDuration - (now - lastFrame);
-                lastFrame = now;
-                long wait = ns2us(frameDuration);
-                if (wait > 0)
-                    usleep(wait);
-#else
+
 //-- framerate priority by ma34
 				nsecs_t now;
 				while(1)
@@ -600,7 +621,6 @@ bool BootAnimation::movie()
 					usleep(250);	
 				}
 				lastFrame = now;
-#endif
 
                 if (noTextureCache)
                     glDeleteTextures(1, &frame.tid);
@@ -617,6 +637,67 @@ bool BootAnimation::movie()
         }
     }
 
+    if (mp) {
+        mp->stop();
+        mp->disconnect();
+        delete mp;
+    }
+
+    return false;
+}
+
+bool BootAnimation::movie()
+{
+    char propValue[PROPERTY_VALUE_MAX];
+    bool isBootCompleted = false;
+
+    if (mNoBootAnimationWait) {
+        property_set("sys.bootanim_completed", "1");
+    }
+
+	//SurfaceTextureClient mSTC;
+    MediaPlayer* mp = NULL;
+    if (mAudioFile[0] != '\0') {
+        mp = new MediaPlayer();
+        if (mp->setDataSource(mMovieFile, NULL) == NO_ERROR) {
+            //mp->setAudioStreamType(AUDIO_STREAM_SYSTEM);
+            mp->setVolume(mAudioVolume, mAudioVolume);
+
+	        //mSurface->getSurfaceTexture()
+            mp->setVideoSurfaceTexture(mFlingerSurface->getSurfaceTexture());
+            mp->prepare();
+            mp->seekTo(0);
+            mp->start();
+        } else {
+            LOGE("Failed to load audio file: %s", mAudioFile);
+            mp->disconnect();
+            delete mp;
+            mp = NULL;
+        }
+    }
+
+	while(!exitPending()&& !isBootCompleted)
+	{
+		if (mNoBootAnimationWait && !isBootCompleted)
+		{
+		    property_get("sys.boot_completed", propValue, "0");
+		    if (propValue[0] == '1') {
+				isBootCompleted = true;
+				break;
+		    }
+		}
+		if(mp)
+		{
+			if(!mp->isPlaying())
+			{
+				break;
+			}
+		}
+		else
+		{
+			break;
+		}
+	}
     if (mp) {
         mp->stop();
         mp->disconnect();

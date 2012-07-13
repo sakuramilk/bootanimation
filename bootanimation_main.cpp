@@ -66,6 +66,17 @@ int main(int argc, char** argv)
         LOGI("bootsound_volume=%f", bootsoundVolume);
     }
 
+	char bootmovieFile[PROPERTY_VALUE_MAX];
+    int noBootMovie = atoi(value);
+    LOGI_IF(noBootMovie,  "boot nobootMovie disabled");
+    if (!noBootMovie) {
+        property_get("persist.sys.boomovie_file", bootmovieFile, "/data/local/bootsound.mp4");
+        LOGI("bootsound_file=%s", bootmovieFile);
+        property_get("persist.sys.boosound_volume", value, "0.2");
+        bootsoundVolume = atof(value);
+        LOGI("bootsound_volume=%f", bootsoundVolume);
+    }
+
     if (!noBootAnimation) {
 
         //LOGI("[BOOT] setuid graphics");
@@ -82,12 +93,16 @@ int main(int argc, char** argv)
 		{
 			LOGI("bootsound_file_args=%s", argv[2]);
 		}
-
+		if(argc > 3)
+		{
+			LOGI("boomovie_file=%s", argv[3]);
+		}
         // create the boot animation object
         sp<BootAnimation> boot = new BootAnimation(
                                          noBootAnimationWait ? true : false,
                                          argc > 1 ? argv[1] : NULL,
                                          noBootSound ? NULL : (argc > 2 ? argv[2] : bootsoundFile),
+                                         noBootMovie ? NULL : (argc > 3 ? argv[3] : bootmovieFile),
                                          bootsoundVolume);
 
         IPCThreadState::self()->joinThreadPool();
