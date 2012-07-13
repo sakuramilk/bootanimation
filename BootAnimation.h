@@ -40,7 +40,12 @@ class AssetManager;
 class BootAnimation : public Thread, public IBinder::DeathRecipient
 {
 public:
-                BootAnimation();
+                BootAnimation(
+                    bool noBootAnimationWait,
+                    const char* animationFile,
+                    const char* audioFile,
+                    const char* movieFile,
+                    float audioVolume);
     virtual     ~BootAnimation();
 
     sp<SurfaceComposerClient> session() const;
@@ -81,6 +86,7 @@ private:
     status_t initTexture(Texture* texture, AssetManager& asset, const char* name);
     status_t initTexture(void* buffer, size_t len);
     bool android();
+    bool animation();
     bool movie();
 
     sp<SurfaceComposerClient>       mSession;
@@ -94,7 +100,13 @@ private:
     sp<SurfaceControl> mFlingerSurfaceControl;
     sp<Surface> mFlingerSurface;
     bool        mAndroidAnimation;
+    bool        mMoviePlay;
     ZipFileRO   mZip;
+    char mAnimationFile[PATH_MAX];
+    char mAudioFile[PATH_MAX];
+    char mMovieFile[PATH_MAX];
+    float mAudioVolume;
+    bool mNoBootAnimationWait;
 };
 
 // ---------------------------------------------------------------------------

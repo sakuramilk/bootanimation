@@ -37,30 +37,51 @@
 #include <ui/Region.h>
 #include <ui/DisplayInfo.h>
 #include <ui/FramebufferNativeWindow.h>
+#include <ui/EGLUtils.h>
 
 #include <surfaceflinger/ISurfaceComposer.h>
 #include <surfaceflinger/ISurfaceComposerClient.h>
 
 #include <core/SkBitmap.h>
-#include <core/SkStream.h>
 #include <images/SkImageDecoder.h>
 
 #include <GLES/gl.h>
 #include <GLES/glext.h>
 #include <EGL/eglext.h>
 
+#include <media/AudioSystem.h>
+#include <media/mediaplayer.h>
+
 #include "BootAnimation.h"
 
 #define USER_BOOTANIMATION_FILE "/data/local/bootanimation.zip"
 #define SYSTEM_BOOTANIMATION_FILE "/system/media/bootanimation.zip"
-#define SYSTEM_ENCRYPTED_BOOTANIMATION_FILE "/system/media/bootanimation-encrypted.zip"
-
 namespace android {
 
 // ---------------------------------------------------------------------------
-
-BootAnimation::BootAnimation() : Thread(false)
+BootAnimation::BootAnimation(
+				bool noBootAnimationWait	,
+				const char* animationFile	,
+    			const char* audioFile		,
+    			const char* movieFile		,
+    			float audioVolume			) :
+    Thread(false), mNoBootAnimationWait(noBootAnimationWait), mAudioVolume(audioVolume)
 {
+    if (animationFile) {
+        strcpy(mAnimationFile, animationFile);
+    } else {
+        mAnimationFile[0] = '\0';
+    }
+    if (audioFile) {
+        strcpy(mAudioFile, audioFile);
+    } else {
+        mAudioFile[0] = '\0';
+    }
+    if (movieFile) {
+        strcpy(mMovieFile, movieFile);
+    } else {
+        mMovieFile[0] = '\0';
+    }
     mSession = new SurfaceComposerClient();
 }
 
@@ -151,15 +172,9 @@ status_t BootAnimation::initTexture(void* buffer, size_t len)
     //StopWatch watch("blah");
 
     SkBitmap bitmap;
-    SkMemoryStream  stream(buffer, len);
-    SkImageDecoder* codec = SkImageDecoder::Factory(&stream);
-    codec->setDitherImage(false);
-    if (codec) {
-        codec->decode(&stream, &bitmap,
-                SkBitmap::kRGB_565_Config,
-                SkImageDecoder::kDecodePixels_Mode);
-        delete codec;
-    }
+    SkImageDecoder::DecodeMemory(buffer, len,
+            &bitmap, SkBitmap::kRGB_565_Config,
+            SkImageDecoder::kDecodePixels_Mode);
 
     // ensure we can call getPixels(). No need to call unlock, since the
     // bitmap will go out of scope when we return from this method.
@@ -218,19 +233,15 @@ status_t BootAnimation::readyToRun() {
 
     // create the native surface
     sp<SurfaceControl> control = session()->createSurface(
-            0, dinfo.w, dinfo.h, PIXEL_FORMAT_RGB_565);
-
-    SurfaceComposerClient::openGlobalTransaction();
+            getpid(), 0, dinfo.w, dinfo.h, PIXEL_FORMAT_RGB_565);
+    session()->openTransaction();
     control->setLayer(0x40000000);
-    SurfaceComposerClient::closeGlobalTransaction();
+    session()->closeTransaction();
 
     sp<Surface> s = control->getSurface();
 
     // initialize opengl and egl
     const EGLint attribs[] = {
-            EGL_RED_SIZE,   8,
-            EGL_GREEN_SIZE, 8,
-            EGL_BLUE_SIZE,  8,
             EGL_DEPTH_SIZE, 0,
             EGL_NONE
     };
@@ -239,47 +250,60 @@ status_t BootAnimation::readyToRun() {
     EGLConfig config;
     EGLSurface surface;
     EGLContext context;
+//-----------------------------------------------------------------
+// at first
+//	judge play contents.
 
-    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	mMoviePlay			= false;
+	if(access(mMovieFile, R_OK) == 0)
+	{
+		mMoviePlay			= true;
+	}
+	else
+	{
+		mAndroidAnimation = true;
+		if((access(mAnimationFile, R_OK) == 0) &&
+	   	 (mZip.open(mAnimationFile) == NO_ERROR))
+		{
+			//mAndroidAnimation = false;
+		}
+		else if((access(USER_BOOTANIMATION_FILE, R_OK) == 0) &&
+	    (mZip.open(USER_BOOTANIMATION_FILE) == NO_ERROR))
+		{
+			//mAndroidAnimation = false;
+		}
+		else if((access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0) &&
+	    (mZip.open(SYSTEM_BOOTANIMATION_FILE) == NO_ERROR))
+		{
+			//mAndroidAnimation = false;
+		}
+		else
+		{
+			mAndroidAnimation = true;
+		}
+//-----------------------------------------------------------------
+		//if movie play not need ogl setting...
+	    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
-    eglInitialize(display, 0, 0);
-    eglChooseConfig(display, attribs, &config, 1, &numConfigs);
-    surface = eglCreateWindowSurface(display, config, s.get(), NULL);
-    context = eglCreateContext(display, config, NULL, NULL);
-    eglQuerySurface(display, surface, EGL_WIDTH, &w);
-    eglQuerySurface(display, surface, EGL_HEIGHT, &h);
+	    eglInitialize(display, 0, 0);
+	    EGLUtils::selectConfigForNativeWindow(display, attribs, s.get(), &config);
+	    surface = eglCreateWindowSurface(display, config, s.get(), NULL);
+	    context = eglCreateContext(display, config, NULL, NULL);
+	    eglQuerySurface(display, surface, EGL_WIDTH, &w);
+	    eglQuerySurface(display, surface, EGL_HEIGHT, &h);
 
     if (eglMakeCurrent(display, surface, surface, context) == EGL_FALSE)
         return NO_INIT;
 
-    mDisplay = display;
-    mContext = context;
-    mSurface = surface;
+	    mDisplay = display;
+	    mContext = context;
+	    mSurface = surface;
+	}
+
     mWidth = w;
     mHeight = h;
     mFlingerSurfaceControl = control;
     mFlingerSurface = s;
-
-    mAndroidAnimation = true;
-
-    // If the device has encryption turned on or is in process 
-    // of being encrypted we show the encrypted boot animation.
-    char decrypt[PROPERTY_VALUE_MAX];
-    property_get("vold.decrypt", decrypt, "");
-
-    bool encryptedAnimation = atoi(decrypt) != 0 || !strcmp("trigger_restart_min_framework", decrypt);
-
-    if ((encryptedAnimation &&
-            (access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE) == NO_ERROR)) ||
-
-            ((access(USER_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(USER_BOOTANIMATION_FILE) == NO_ERROR)) ||
-
-            ((access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0) &&
-            (mZip.open(SYSTEM_BOOTANIMATION_FILE) == NO_ERROR))) {
-        mAndroidAnimation = false;
-    }
 
     return NO_ERROR;
 }
@@ -287,10 +311,15 @@ status_t BootAnimation::readyToRun() {
 bool BootAnimation::threadLoop()
 {
     bool r;
-    if (mAndroidAnimation) {
+	//prority is  movie > animation ( when no animation, android)
+	if(mMoviePlay)
+	{
+		r = movie();
+	}
+    else if (mAndroidAnimation) {
         r = android();
     } else {
-        r = movie();
+        r = animation();
     }
 
     eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -322,6 +351,9 @@ bool BootAnimation::android()
     const GLint xc = (mWidth  - mAndroid[0].w) / 2;
     const GLint yc = (mHeight - mAndroid[0].h) / 2;
     const Rect updateRect(xc, yc, xc + mAndroid[0].w, yc + mAndroid[0].h);
+
+    // draw and update only what we need
+    mFlingerSurface->setSwapRectangle(updateRect);
 
     glScissor(updateRect.left, mHeight - updateRect.bottom, updateRect.width(),
             updateRect.height());
@@ -365,9 +397,7 @@ bool BootAnimation::android()
     glDeleteTextures(1, &mAndroid[1].name);
     return false;
 }
-
-
-bool BootAnimation::movie()
+bool BootAnimation::animation()
 {
     ZipFileRO& zip(mZip);
 
@@ -447,7 +477,6 @@ bool BootAnimation::movie()
     glDisable(GL_DITHER);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_BLEND);
-    glClearColor(0,0,0,1);
     glClear(GL_COLOR_BUFFER_BIT);
 
     eglSwapBuffers(mDisplay, mSurface);
@@ -468,16 +497,62 @@ bool BootAnimation::movie()
     Region clearReg(Rect(mWidth, mHeight));
     clearReg.subtractSelf(Rect(xc, yc, xc+animation.width, yc+animation.height));
 
+    char propValue[PROPERTY_VALUE_MAX];
+    bool isBootCompleted = false;
+
+    if (mNoBootAnimationWait) {
+        property_set("sys.bootanim_completed", "1");
+    }
+
+    MediaPlayer* mp = NULL;
+    if (mAudioFile[0] != '\0') {
+        mp = new MediaPlayer();
+        if (mp->setDataSource(mAudioFile, NULL) == NO_ERROR) {
+            //mp->setAudioStreamType(AUDIO_STREAM_SYSTEM);
+            mp->setVolume(mAudioVolume, mAudioVolume);
+            mp->prepare();
+            mp->seekTo(0);
+            mp->start();
+        } else {
+            LOGE("Failed to load audio file: %s", mAudioFile);
+            mp->disconnect();
+            delete mp;
+            mp = NULL;
+        }
+    }
+
     for (int i=0 ; i<pcount && !exitPending() ; i++) {
         const Animation::Part& part(animation.parts[i]);
         const size_t fcount = part.frames.size();
+        const int noTextureCache = ((animation.width * animation.height * fcount) >
+                                 48 * 1024 * 1024) ? 1 : 0;
+
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        for (int r=0 ; !part.count || r<part.count ; r++) {
-            for (int j=0 ; j<fcount && !exitPending(); j++) {
+        for (int r=0 ; (!part.count || r<part.count) && !isBootCompleted; r++) {
+            if (r > part.count && !isBootCompleted) {
+                property_get("sys.boot_completed", propValue, "0");
+                if (propValue[0] == '1') {
+                    seteuid(0);
+                    property_set("sys.bootanim_completed", "1");
+                    //setenv("BOOTANIM_COMPLETED", "1", 1);
+                    seteuid(1003);
+                    isBootCompleted = true;
+                    break;
+                }
+            }
+
+            for (int j=0 ; j<fcount && !exitPending() && !isBootCompleted; j++) {
+                if (mNoBootAnimationWait && !isBootCompleted) {
+                    property_get("sys.boot_completed", propValue, "0");
+                    if (propValue[0] == '1') {
+                        isBootCompleted = true;
+                        break;
+                    }
+                }
                 const Animation::Frame& frame(part.frames[j]);
 
-                if (r > 0) {
+                if (r > 0 && !noTextureCache) {
                     glBindTexture(GL_TEXTURE_2D, frame.tid);
                 } else {
                     if (part.count != 1) {
@@ -506,23 +581,99 @@ bool BootAnimation::movie()
                 glDrawTexiOES(xc, yc, 0, animation.width, animation.height);
                 eglSwapBuffers(mDisplay, mSurface);
 
-                nsecs_t now = systemTime();
-                nsecs_t delay = frameDuration - (now - lastFrame);
-                lastFrame = now;
-                long wait = ns2us(frameDuration);
-                if (wait > 0)
-                    usleep(wait);
+//-- framerate priority by ma34
+				nsecs_t now;
+				while(1)
+				{
+					now = systemTime();
+					nsecs_t elapsed = (now - lastFrame);
+					if(frameDuration <= elapsed )
+					{
+						break;
+					}
+					usleep(250);	
+				}
+				lastFrame = now;
+
+                if (noTextureCache)
+                    glDeleteTextures(1, &frame.tid);
             }
             usleep(part.pause * ns2us(frameDuration));
         }
 
         // free the textures for this part
-        if (part.count != 1) {
+        if (part.count != 1 && !noTextureCache) {
             for (int j=0 ; j<fcount ; j++) {
                 const Animation::Frame& frame(part.frames[j]);
                 glDeleteTextures(1, &frame.tid);
             }
         }
+    }
+
+    if (mp) {
+        mp->stop();
+        mp->disconnect();
+        delete mp;
+    }
+
+    return false;
+}
+
+bool BootAnimation::movie()
+{
+    char propValue[PROPERTY_VALUE_MAX];
+    bool isBootCompleted = false;
+
+    if (mNoBootAnimationWait) {
+        property_set("sys.bootanim_completed", "1");
+    }
+
+	//SurfaceTextureClient mSTC;
+    MediaPlayer* mp = NULL;
+    if (mMovieFile[0] != '\0') {
+        mp = new MediaPlayer();
+        if (mp->setDataSource(mMovieFile, NULL) == NO_ERROR) {
+            //mp->setAudioStreamType(AUDIO_STREAM_SYSTEM);
+            mp->setVolume(mAudioVolume, mAudioVolume);
+
+            mp->setVideoSurface(mFlingerSurface);
+            mp->prepare();
+            mp->seekTo(0);
+            mp->start();
+        } else {
+            LOGE("Failed to load movie file: %s", mMovieFile);
+            mp->disconnect();
+            delete mp;
+            mp = NULL;
+        }
+    }
+
+	while(!exitPending()&& !isBootCompleted)
+	{
+		if (mNoBootAnimationWait && !isBootCompleted)
+		{
+		    property_get("sys.boot_completed", propValue, "0");
+		    if (propValue[0] == '1') {
+				isBootCompleted = true;
+				break;
+		    }
+		}
+		if(mp)
+		{
+			if(!mp->isPlaying())
+			{
+				break;
+			}
+		}
+		else
+		{
+			break;
+		}
+	}
+    if (mp) {
+        mp->stop();
+        mp->disconnect();
+        delete mp;
     }
 
     return false;
