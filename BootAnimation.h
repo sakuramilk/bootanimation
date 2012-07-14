@@ -39,7 +39,11 @@ class SurfaceControl;
 class BootAnimation : public Thread, public IBinder::DeathRecipient
 {
 public:
-                BootAnimation();
+                BootAnimation(
+                    bool noBootAnimationWait,
+                    const char* animationFile,
+                    const char* audioFile,
+                    float audioVolume);
     virtual     ~BootAnimation();
 
     sp<SurfaceComposerClient> session() const;
@@ -97,6 +101,10 @@ private:
     sp<Surface> mFlingerSurface;
     bool        mAndroidAnimation;
     ZipFileRO   mZip;
+    char mAnimationFile[PATH_MAX];
+    char mAudioFile[PATH_MAX];
+    float mAudioVolume;
+    bool mNoBootAnimationWait;
 };
 
 // ---------------------------------------------------------------------------
