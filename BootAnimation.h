@@ -20,11 +20,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <androidfw/AssetManager.h>
 #include <utils/threads.h>
-#include <utils/AssetManager.h>
-
-#include <surfaceflinger/ISurfaceComposer.h>
-#include <surfaceflinger/SurfaceComposerClient.h>
 
 #include <EGL/egl.h>
 #include <GLES/gl.h>
@@ -33,19 +30,16 @@ class SkBitmap;
 
 namespace android {
 
-class AssetManager;
+class Surface;
+class SurfaceComposerClient;
+class SurfaceControl;
 
 // ---------------------------------------------------------------------------
 
 class BootAnimation : public Thread, public IBinder::DeathRecipient
 {
 public:
-                BootAnimation(
-                    bool noBootAnimationWait,
-                    const char* animationFile,
-                    const char* audioFile,
-                    const char* movieFile,
-                    float audioVolume);
+                BootAnimation();
     virtual     ~BootAnimation();
 
     sp<SurfaceComposerClient> session() const;
@@ -76,6 +70,7 @@ private:
             int pause;
             String8 path;
             SortedVector<Frame> frames;
+            bool playUntilComplete;
         };
         int fps;
         int width;
@@ -86,8 +81,9 @@ private:
     status_t initTexture(Texture* texture, AssetManager& asset, const char* name);
     status_t initTexture(void* buffer, size_t len);
     bool android();
-    bool animation();
     bool movie();
+
+    void checkExit();
 
     sp<SurfaceComposerClient>       mSession;
     AssetManager mAssets;
@@ -100,13 +96,7 @@ private:
     sp<SurfaceControl> mFlingerSurfaceControl;
     sp<Surface> mFlingerSurface;
     bool        mAndroidAnimation;
-    bool        mMoviePlay;
     ZipFileRO   mZip;
-    char mAnimationFile[PATH_MAX];
-    char mAudioFile[PATH_MAX];
-    char mMovieFile[PATH_MAX];
-    float mAudioVolume;
-    bool mNoBootAnimationWait;
 };
 
 // ---------------------------------------------------------------------------
