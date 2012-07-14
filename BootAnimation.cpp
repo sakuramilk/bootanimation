@@ -657,7 +657,7 @@ bool BootAnimation::movie()
 
 	//SurfaceTextureClient mSTC;
     MediaPlayer* mp = NULL;
-    if (mAudioFile[0] != '\0') {
+    if (mMovieFile[0] != '\0') {
         mp = new MediaPlayer();
         if (mp->setDataSource(mMovieFile, NULL) == NO_ERROR) {
             //mp->setAudioStreamType(AUDIO_STREAM_SYSTEM);
@@ -669,7 +669,7 @@ bool BootAnimation::movie()
             mp->seekTo(0);
             mp->start();
         } else {
-            LOGE("Failed to load audio file: %s", mAudioFile);
+            LOGE("Failed to load movie file: %s", mMovieFile);
             mp->disconnect();
             delete mp;
             mp = NULL;
