@@ -58,8 +58,6 @@
 #define SYSTEM_BOOTANIMATION_FILE "/system/media/bootanimation.zip"
 #define SYSTEM_ENCRYPTED_BOOTANIMATION_FILE "/system/media/bootanimation-encrypted.zip"
 
-//#define USER_BOOTMOVIE_FILE "/data/local/bootmovie.mp4"
-
 namespace android {
 
 // ---------------------------------------------------------------------------
@@ -69,7 +67,9 @@ BootAnimation::BootAnimation(
     			const char* audioFile		,
     			const char* movieFile		,
     			float audioVolume			) :
-    Thread(false), mNoBootAnimationWait(noBootAnimationWait), mAudioVolume(audioVolume)
+    Thread(false),
+    mAudioVolume(audioVolume),
+    mNoBootAnimationWait(noBootAnimationWait)
 {
     if (animationFile) {
         strcpy(mAnimationFile, animationFile);
@@ -327,6 +327,39 @@ status_t BootAnimation::readyToRun() {
 	    mDisplay = display;
 	    mContext = context;
 	    mSurface = surface;
+
+	#ifdef PRELOAD_BOOTANIMATION
+	    // Preload the bootanimation zip on memory, so we don't stutter
+	    // when showing the animation
+	    FILE* fd;
+	    if (encryptedAnimation && access(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, R_OK) == 0)
+	        fd = fopen(SYSTEM_ENCRYPTED_BOOTANIMATION_FILE, "r");
+	    else if (access(mAnimationFile, R_OK) == 0)
+	        fd = fopen(mAnimationFile, "r");
+	    else if (access(USER_BOOTANIMATION_FILE, R_OK) == 0)
+	        fd = fopen(USER_BOOTANIMATION_FILE, "r");
+	    else if (access(SYSTEM_BOOTANIMATION_FILE, R_OK) == 0)
+	        fd = fopen(SYSTEM_BOOTANIMATION_FILE, "r");
+	    else
+	        return NO_ERROR;
+	
+	    if (fd != NULL) {
+	        // We could use readahead..
+	        // ... if bionic supported it :(
+	        //readahead(fd, 0, INT_MAX);
+	        void *crappyBuffer = malloc(2*1024*1024);
+	        if (crappyBuffer != NULL) {
+	            // Read all the zip
+	            while (!feof(fd))
+	                fread(crappyBuffer, 1024, 2*1024, fd);
+	
+	            free(crappyBuffer);
+	        } else {
+	            LOGW("Unable to allocate memory to preload the animation");
+	        }
+	        fclose(fd);
+	    }
+	#endif
 	}
 
     mWidth = w;
@@ -434,12 +467,13 @@ bool BootAnimation::animation()
     if (!descMap) {
         return false;
     }
-
+    LOGI("+++ %s", __func__);
     String8 desString((char const*)descMap->getDataPtr(),
             descMap->getDataLength());
     char const* s = desString.string();
 
     Animation animation;
+    animation.width = animation.height = animation.fps = 0;
 
     // Parse the description file
     for (;;) {
@@ -450,13 +484,13 @@ bool BootAnimation::animation()
         int fps, width, height, count, pause;
         char path[256];
         if (sscanf(l, "%d %d %d", &width, &height, &fps) == 3) {
-            //LOGD("> w=%d, h=%d, fps=%d", fps, width, height);
-            animation.width = width;
-            animation.height = height;
-            animation.fps = fps;
+            LOGD("> w=%d, h=%d, fps=%d", width, height, fps);
+            if (animation.width == 0) animation.width = width;
+            if (animation.height == 0) animation.height = height;
+            if (animation.fps == 0) animation.fps = fps;
         }
         if (sscanf(l, "p %d %d %s", &count, &pause, path) == 3) {
-            //LOGD("> count=%d, pause=%d, path=%s", count, pause, path);
+            LOGD("> count=%d, pause=%d, path=%s", count, pause, path);
             Animation::Part part;
             part.count = count;
             part.pause = pause;
@@ -464,6 +498,11 @@ bool BootAnimation::animation()
             animation.parts.add(part);
         }
         s = ++endl;
+    }
+
+    // check fps
+    if (animation.fps == 0) {
+        animation.fps = 30; // set safe value
     }
 
     // read all the data structures
@@ -476,7 +515,7 @@ bool BootAnimation::animation()
             const String8 path(entryName.getPathDir());
             const String8 leaf(entryName.getPathLeaf());
             if (leaf.size() > 0) {
-                for (int j=0 ; j<pcount ; j++) {
+                for (size_t j=0 ; j<pcount ; j++) {
                     if (path == animation.parts[j].path) {
                         int method;
                         // supports only stored png files
@@ -548,11 +587,17 @@ bool BootAnimation::animation()
         }
     }
 
-    for (int i=0 ; i<pcount && !exitPending() ; i++) {
+    for (size_t i=0 ; i<pcount && !exitPending() ; i++) {
         const Animation::Part& part(animation.parts[i]);
         const size_t fcount = part.frames.size();
+
+        // can be 1, 0, or not set
+        #ifdef NO_TEXTURE_CACHE
+        const int noTextureCache = NO_TEXTURE_CACHE;
+        #else
         const int noTextureCache = ((animation.width * animation.height * fcount) >
                                  48 * 1024 * 1024) ? 1 : 0;
+        #endif
 
         glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -568,8 +613,7 @@ bool BootAnimation::animation()
                     break;
                 }
             }
-
-            for (int j=0 ; j<fcount && !exitPending() && !isBootCompleted; j++) {
+            for (size_t j=0 ; j<fcount && !exitPending() && !isBootCompleted; j++) {
                 if (mNoBootAnimationWait && !isBootCompleted) {
                     property_get("sys.boot_completed", propValue, "0");
                     if (propValue[0] == '1') {
@@ -630,7 +674,7 @@ bool BootAnimation::animation()
 
         // free the textures for this part
         if (part.count != 1 && !noTextureCache) {
-            for (int j=0 ; j<fcount ; j++) {
+            for (size_t j=0 ; j<fcount ; j++) {
                 const Animation::Frame& frame(part.frames[j]);
                 glDeleteTextures(1, &frame.tid);
             }
