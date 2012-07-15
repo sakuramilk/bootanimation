@@ -70,7 +70,7 @@ int main(int argc, char** argv)
     int noBootMovie = atoi(value);
     LOGI_IF(noBootMovie,  "boot nobootMovie disabled");
     if (!noBootMovie) {
-        property_get("persist.sys.boomovie_file", bootmovieFile, "/data/local/bootsound.mp4");
+        property_get("persist.sys.boomovie_file", bootmovieFile, "/data/local/bootmovie.mp4");
         LOGI("bootsound_file=%s", bootmovieFile);
         property_get("persist.sys.boosound_volume", value, "0.2");
         bootsoundVolume = atof(value);
