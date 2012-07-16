@@ -373,6 +373,8 @@ status_t BootAnimation::readyToRun() {
 bool BootAnimation::threadLoop()
 {
     bool r;
+    property_set("sys.bootanim_wait", "1");
+
 	//prority is  movie > animation ( when no animation, android)
 	if(mMoviePlay)
 	{
@@ -383,6 +385,12 @@ bool BootAnimation::threadLoop()
     } else {
         r = animation();
     }
+
+	//set complete to system
+	seteuid(0);
+	property_set("sys.bootanim_completed", "1");
+	//setenv("BOOTANIM_COMPLETED", "1", 1);
+	seteuid(1003);
 
     eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(mDisplay, mContext);
@@ -696,6 +704,7 @@ bool BootAnimation::movie()
     bool isBootCompleted = false;
 
     if (mNoBootAnimationWait) {
+    	LOGI("detect mNoBootAnimationWait");
         property_set("sys.bootanim_completed", "1");
     }
 
@@ -720,34 +729,29 @@ bool BootAnimation::movie()
         }
     }
 
-	while(!exitPending()&& !isBootCompleted)
-	{
-		if (mNoBootAnimationWait && !isBootCompleted)
+	if (mp) {
+		LOGI("wait play : %s", mMovieFile);
+		while(!exitPending()&& !isBootCompleted)
 		{
-		    property_get("sys.boot_completed", propValue, "0");
-		    if (propValue[0] == '1') {
-				isBootCompleted = true;
-				break;
-		    }
-		}
-		if(mp)
-		{
+			if (mNoBootAnimationWait && !isBootCompleted)
+			{
+			    property_get("sys.boot_completed", propValue, "0");
+			    if (propValue[0] == '1') {
+					isBootCompleted = true;
+					break;
+			    }
+			}
+			
 			if(!mp->isPlaying())
 			{
 				break;
 			}
 		}
-		else
-		{
-			break;
-		}
-	}
-    if (mp) {
-        mp->stop();
-        mp->disconnect();
-        delete mp;
-    }
 
+		mp->stop();
+		mp->disconnect();
+		delete mp;
+	}
     return false;
 }
 

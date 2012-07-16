@@ -51,7 +51,13 @@ int main(int argc, char** argv)
 
     property_get("persist.sys.nobootanimationwait", value, "0");
     int noBootAnimationWait = atoi(value);
+	//for compatibility
+    property_get("persist.sys.nowait_animation", value, "0");
+    noBootAnimationWait += atoi(value);
+    
     LOGI_IF(noBootAnimationWait,  "boot animation wait disabled");
+
+
 
     char bootsoundFile[PROPERTY_VALUE_MAX];
     float bootsoundVolume = 0.2;
