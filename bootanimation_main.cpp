@@ -73,6 +73,7 @@ int main(int argc, char** argv)
     }
 
 	char bootmovieFile[PROPERTY_VALUE_MAX];
+	property_get("persist.sys.nobootmovie", value, "0");
     int noBootMovie = atoi(value);
     LOGI_IF(noBootMovie,  "boot nobootMovie disabled");
     if (!noBootMovie) {
