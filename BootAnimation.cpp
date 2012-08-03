@@ -242,14 +242,15 @@ status_t BootAnimation::readyToRun() {
         return -1;
 
     // create the native surface
+
     sp<SurfaceControl> control = session()->createSurface(
             0, dinfo.w, dinfo.h, PIXEL_FORMAT_RGB_565);
-
     SurfaceComposerClient::openGlobalTransaction();
     control->setLayer(0x40000000);
     SurfaceComposerClient::closeGlobalTransaction();
 
     sp<Surface> s = control->getSurface();
+
 
     // initialize opengl and egl
     const EGLint attribs[] = {
@@ -587,6 +588,9 @@ bool BootAnimation::animation()
             mp->prepare();
             mp->seekTo(0);
             mp->start();
+//          status_t        getVideoWidth(int *w);
+//          status_t        getVideoHeight(int *h);
+
         } else {
             LOGE("Failed to load audio file: %s", mAudioFile);
             mp->disconnect();
@@ -713,6 +717,8 @@ bool BootAnimation::movie()
     if (mMovieFile[0] != '\0') {
         mp = new MediaPlayer();
         if (mp->setDataSource(mMovieFile, NULL) == NO_ERROR) {
+
+
             //mp->setAudioStreamType(AUDIO_STREAM_SYSTEM);
             mp->setVolume(mAudioVolume, mAudioVolume);
 
@@ -746,6 +752,7 @@ bool BootAnimation::movie()
 			{
 				break;
 			}
+			usleep(5000);//sleep
 		}
 
 		mp->stop();
