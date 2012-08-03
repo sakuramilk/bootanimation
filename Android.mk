@@ -17,6 +17,7 @@ LOCAL_SHARED_LIBRARIES := \
     libEGL \
     libGLESv1_CM \
     libgui \
+	libmedia_native \
     libmedia
 
 LOCAL_C_INCLUDES := \

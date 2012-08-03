@@ -43,13 +43,18 @@ int main(int argc, char** argv)
 #endif
 
     char value[PROPERTY_VALUE_MAX];
-    property_get("debug.sf.nobootanimation", value, "0");
-	//property_get("persist.sys.nobootanimation", value, "0");
+    property_get("persist.sys.nobootanimation", value, "0");
+    //property_get("debug.sf.nobootanimation", value, "0");
+
     int noBootAnimation = atoi(value);
     ALOGI_IF(noBootAnimation,  "boot animation disabled");
 
-	property_get("persist.sys.nobootanimationwait", value, "0");
+    property_get("persist.sys.nobootanimationwait", value, "0");
     int noBootAnimationWait = atoi(value);
+	//for compatibility
+    property_get("persist.sys.nowait_animation", value, "0");
+    noBootAnimationWait += atoi(value);
+    
     ALOGI_IF(noBootAnimationWait,  "boot animation wait disabled");
 
     char bootsoundFile[PROPERTY_VALUE_MAX];
@@ -64,20 +69,44 @@ int main(int argc, char** argv)
         bootsoundVolume = atof(value);
         ALOGI("bootsound_volume=%f", bootsoundVolume);
     }
+	char bootmovieFile[PROPERTY_VALUE_MAX];
+	property_get("persist.sys.nobootmovie", value, "0");
+    int noBootMovie = atoi(value);
+    ALOGI_IF(noBootMovie,  "boot nobootMovie disabled");
+    if (!noBootMovie) {
+        property_get("persist.sys.boomovie_file", bootmovieFile, "/data/local/bootmovie.mp4");
+        ALOGI("bootsound_file=%s", bootmovieFile);
+        property_get("persist.sys.boosound_volume", value, "0.2");
+        bootsoundVolume = atof(value);
+        ALOGI("bootsound_volume=%f", bootsoundVolume);
+    }
 
-  if (!noBootAnimation) {
+    if (!noBootAnimation) {
 
-      //LOGI("[BOOT] setuid graphics");
+      //ALOGI("[BOOT] setuid graphics");
         seteuid(1003);
 
         sp<ProcessState> proc(ProcessState::self());
         ProcessState::self()->startThreadPool();
 
+		if(argc > 1)
+		{
+			ALOGI("bootanim_file_args=%s", argv[1]);
+		}
+		if(argc > 2)
+		{
+			ALOGI("bootsound_file_args=%s", argv[2]);
+		}
+		if(argc > 3)
+		{
+			ALOGI("boomovie_file=%s", argv[3]);
+		}
         // create the boot animation object
         sp<BootAnimation> boot = new BootAnimation(
                                          noBootAnimationWait ? true : false,
                                          argc > 1 ? argv[1] : NULL,
                                          noBootSound ? NULL : (argc > 2 ? argv[2] : bootsoundFile),
+                                         noBootMovie ? NULL : (argc > 3 ? argv[3] : bootmovieFile),
                                          bootsoundVolume);
 
         IPCThreadState::self()->joinThreadPool();
